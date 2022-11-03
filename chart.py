@@ -52,3 +52,20 @@ class Chart:
                 )
 
         fig.show()
+
+    def Monthly_Return(self):
+        df = self.profolio.buy_sell_pair
+        df['year'] = pd.DatetimeIndex(df['DateSold']).year
+        df['month'] = pd.DatetimeIndex(df['DateSold']).month
+        df['return'] = df['SalesProceeds'] - df['Cost']
+        df1 = df.groupby(by=[df.year, df.month]).sum()
+        df1 = df1.reset_index()
+        df1['Date'] = pd.to_datetime([f'{y}-{m}-01' for y, m in zip(df1.year, df1.month)])
+        df1['color'] = df1['return']>0
+
+
+        fig1= px.bar(df1, x='Date', y='return', title='Monthly Return', color='color', color_discrete_map={True:'#EF553B',False: '#00CC96'})
+        fig1.update_layout(hovermode="x")
+        fig1.update_xaxes( tickformat="%b\n%Y")
+
+        fig1.show()
