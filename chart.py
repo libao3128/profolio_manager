@@ -1,6 +1,8 @@
 import plotly.express as px
 import pandas as pd
 import numpy as np
+import yfinance as yf
+from plotly.subplots import make_subplots
 
 class Chart:
     def __init__(self, profolio) -> None:
@@ -69,3 +71,59 @@ class Chart:
         fig1.update_xaxes( tickformat="%b\n%Y")
 
         fig1.show()
+
+    def ROI_Compare(self, date_range='default', benchmark_name=['^DJI','^GSPC','^IXIC']):
+        if date_range == 'default':
+            min_date = pd.to_datetime(min(self.profolio.history['TradeDate'])).replace(day=1)
+        
+
+        benchmark = yf.download(benchmark_name)
+        benchmark = pd.DataFrame(benchmark['Adj Close'])
+        benchmark.index = pd.DatetimeIndex(benchmark.index)
+
+        pair = self.profolio.buy_sell_pair
+        Return = pd.DataFrame(pair.groupby('DateSold').sum()['return'])
+        Return.index=pd.DatetimeIndex(Return.index)
+        history = self.profolio.history
+        In = history[history['Action']=='Other']
+        In = In.groupby('TradeDate').sum()
+        In = In[In['Amount']>0] 
+        In.index = pd.DatetimeIndex(In.index)
+
+        benchmark['return'] = Return['return']
+        benchmark['In'] = In['Amount']
+        benchmark = benchmark.replace(np.nan, 0)
+        benchmark['return'] = benchmark['return'].cumsum()
+        benchmark['In'] = benchmark['In'].cumsum()
+
+        benchmark['total'] = benchmark['return'] + benchmark['In']
+        benchmark['ROI'] = benchmark['total'] / benchmark['In']
+        benchmark = benchmark.replace(np.nan, 1)
+
+        fig = make_subplots(
+            rows=2, cols=1,
+            row_width=[0.3, 0.7],
+            start_cell="top-left",
+            subplot_titles=['ROI Comparison'],
+            shared_xaxes=True,vertical_spacing=0.05)
+        fig.add_scatter(y= benchmark[benchmark.index>=min_date]['ROI'],
+            x=benchmark[benchmark.index>=min_date].index, 
+            row=1, col=1, name='Profolio',
+            line=dict(color=px.colors.qualitative.Plotly[1]))
+       
+        for i,col in enumerate(benchmark_name):
+            df = benchmark[benchmark.index>=min_date].copy()
+            df.loc[:,col] = df.loc[:,col]/df.loc[:,col].iloc[0]
+            fig.add_scatter(y= df.loc[:,col],x=df.index, row=1, col=1, 
+                name=col,line=dict(color=px.colors.qualitative.Pastel1[i]))
+
+        
+        #fig.add_scatter(y= df['cummulative_return_rate'],x=df.index, row=1, col=1, name='ROI')
+        fig.update_traces(mode="lines", hovertemplate=None)
+        fig.update_layout(xaxis_title="", yaxis_title="ROI", yaxis_tickformat = '.2%')
+        fig.update_xaxes(title='x', visible=False, showticklabels=False, row=1, col=1)
+        fig.update_layout(hovermode="x")
+        fig.update_layout(legend_title_text='ROI')
+        fig.add_bar(y=Return[Return['return']>=0]['return'],x=Return[Return['return']>=0]['return'].index,marker={'color':'#EF553B'}, row=2, col=1,name='earn', showlegend=False)
+        fig.add_bar(y=Return[Return['return']<0]['return'],x=Return[Return['return']<0].index,marker={'color':'#00CC96'}, row=2, col=1,name='lost', showlegend=False)
+        fig.show()
