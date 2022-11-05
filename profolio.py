@@ -92,7 +92,7 @@ class Profolio:
         self.buy_sell_pair.to_excel(self.name+"_Gain_Loss.xlsx")
 
     @property
-    def storage(self):
+    def trade_history(self):
         df = self.history[self.history['Remain_Quant']!=0].copy()
         df = df[df['RecordType']=='Trade']
 
@@ -104,7 +104,7 @@ class Profolio:
         return df[df['RecordType']=='Trade']
     @property
     def stock_value(self):
-        if self.cal_stock_value:
+        if self.cal_stock_value is not None:
             return self.cal_stock_value.copy()
         df = self.trade_history
         df['Quantity'] = df['Quantity'].astype(float)
@@ -143,6 +143,7 @@ class Profolio:
         df3 = df2.groupby('TradeDate').sum()
 
         df3 = df3[df3['Price']!=0]
+        df3.index = df3.index.to_timestamp()
         self.cal_stock_value = df3['MarketValue'].copy()
         return self.cal_stock_value.copy()
 
@@ -169,7 +170,7 @@ class Profolio:
         dividend = self.dividend
         cash_flow = self.cash_flow
 
-        df = profolio.history
+        df = self.history
         df = df[df['RecordType']=='Trade']
         trade = df.groupby('TradeDate').sum()
         trade = trade.reset_index()
@@ -177,7 +178,8 @@ class Profolio:
         money = pd.concat([trade, dividend, cash_flow], ignore_index=True)
         money = money.groupby('TradeDate').sum()
         money = money.cumsum()
-        return money.copy()
+        money.index = pd.DatetimeIndex(money.index) 
+        return money['Amount'].copy()
 
 if __name__ == '__main__':
     profolio = Profolio('Firstrade')

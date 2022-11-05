@@ -3,6 +3,9 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 from plotly.subplots import make_subplots
+from datetime import datetime
+from profolio import Profolio
+import plotly.graph_objects as go
 
 class Chart:
     def __init__(self, profolio) -> None:
@@ -82,11 +85,12 @@ class Chart:
         benchmark.index = pd.DatetimeIndex(benchmark.index)
 
         pair = self.profolio.buy_sell_pair
-        Return = pd.DataFrame(pair.groupby('DateSold').sum()['return'])
+        pair['return'] = pair['SalesProceeds'] - pair['Cost']
+        Return = pd.DataFrame(pair.groupby('DateSold').sum(numeric_only=False)['return'])
         Return.index=pd.DatetimeIndex(Return.index)
         history = self.profolio.history
         In = history[history['Action']=='Other']
-        In = In.groupby('TradeDate').sum()
+        In = In.groupby('TradeDate').sum(numeric_only=False)
         In = In[In['Amount']>0] 
         In.index = pd.DatetimeIndex(In.index)
 
@@ -127,3 +131,87 @@ class Chart:
         fig.add_bar(y=Return[Return['return']>=0]['return'],x=Return[Return['return']>=0]['return'].index,marker={'color':'#EF553B'}, row=2, col=1,name='earn', showlegend=False)
         fig.add_bar(y=Return[Return['return']<0]['return'],x=Return[Return['return']<0].index,marker={'color':'#00CC96'}, row=2, col=1,name='lost', showlegend=False)
         fig.show()
+
+    def Storage_Share(self):
+        storage = self.profolio.storage
+        #print(storage['Quantity'])
+        #print(storage['Remain_Quant'])
+        #print(storage.groupby('Symbol').sum(numeric_only=False))
+
+        storage = storage.groupby('Symbol').sum(numeric_only=False)['Quantity'].sort_values(ascending=False)
+        
+        storage.index = storage.index.str.strip()
+        storage = pd.DataFrame(storage[storage>0])
+
+
+        price = yf.download(list(storage.index),start=datetime.now())
+
+        storage['price'] = price['Adj Close'].iloc[0]
+        storage['market_value'] = storage['price']*storage['Quantity']
+        storage = storage.reset_index()
+
+        fig = px.pie(storage, 'Symbol', 'market_value', title='Storage Market Value Share')
+        fig.show()
+
+    def Total_Value(self):
+        cash = pd.DataFrame(self.profolio.cash_balance)
+        stock = pd.DataFrame(self.profolio.stock_value)
+
+        min_date = pd.to_datetime(min(min(cash.index),min(stock.index)))
+        max_date = datetime.today()
+        idx = pd.date_range(min_date, max_date)
+        cash = cash.reindex(idx, method='ffill')
+        stock = stock.reindex(idx, method='ffill')
+
+        cash['Balance'] = 'cash'
+        cash.columns = ['Value', 'Balance']
+        cash = cash.fillna(0)
+        stock['Balance'] = 'stock'
+        stock.columns = ['Value', 'Balance']
+        stock = stock.fillna(0)
+
+        df = pd.concat([cash,stock],axis=0)
+
+        df = pd.concat([cash,stock],axis=0)
+        #df = df.fillna(method='ffill')
+        #df = df.fillna(0)
+
+        df = df.reset_index()
+        df.columns = ['Date', 'Value', 'Balance']
+        fig = px.area(
+            df, x='Date', y='Value', color='Balance', 
+            hover_name='Balance', title='Total Value Chart',
+            hover_data={
+            'Balance':False,
+            'Date':False,
+            'Value':':.1f'
+        })
+        #self.__add_benchmark(fig, [min_date])
+        fig.update_layout(legend_title_text='Balance')
+        fig.update_layout(hovermode="x")
+        fig.update_traces(connectgaps=True)
+        fig.show()
+
+    def __add_benchmark(self, fig, date_range,benchmark_name=['^DJI','^GSPC','^IXIC']):
+        benchmark = yf.download(benchmark_name)
+        benchmark = pd.DataFrame(benchmark['Adj Close'])
+        benchmark.index = pd.DatetimeIndex(benchmark.index)
+
+        for i,col in enumerate(benchmark_name):
+            df = benchmark[benchmark.index>=date_range[0]].copy()
+            df.loc[:,col] = df.loc[:,col]/df.loc[:,col].iloc[0]
+            fig.add_trace(
+                go.Scatter(y= df.loc[:,col],x=df.index, 
+                name=col,line=dict(color=px.colors.qualitative.Pastel1[i])),
+                secondary_y=True,
+            )
+    
+if __name__ == '__main__':
+    profolio = Profolio('Firstrade')
+    profolio.from_csv('data/FT_CSV_87701987.csv')
+    new_chart = Chart(profolio)
+    #new_chart.ROE_DayHeld()
+    #new_chart.WinRate_GainLose()
+    #new_chart.Monthly_Return()
+    new_chart.ROI_Compare()
+    #new_chart.Storage_Share()
