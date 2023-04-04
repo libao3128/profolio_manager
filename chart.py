@@ -4,15 +4,18 @@ import numpy as np
 import yfinance as yf
 from plotly.subplots import make_subplots
 from datetime import datetime
-from profolio import Profolio
+
 import plotly.graph_objects as go
 
+from data import Record
+from portfolio import Portfolio
+
 class Chart:
-    def __init__(self, profolio) -> None:
-        self.profolio = profolio
+    def __init__(self, portfolio:Portfolio) -> None:
+        self.portfolio = portfolio
 
     def ROE_DayHeld(self):
-        df = self.profolio.buy_sell_pair
+        df = self.portfolio.record.buy_sell_pair
         df.columns
         df['ROE'] = (df['SalesProceeds']-df['Cost'])/df['Cost']
 
@@ -30,7 +33,7 @@ class Chart:
         fig.show()
 
     def WinRate_GainLose(self):
-        df = self.profolio.buy_sell_pair
+        df = self.portfolio.record.buy_sell_pair
         df.columns
         df['return'] = df['SalesProceeds'] - df['Cost']
         win = df[df['return']>0]
@@ -59,7 +62,7 @@ class Chart:
         fig.show()
 
     def Monthly_Return(self):
-        df = self.profolio.buy_sell_pair
+        df = self.portfolio.buy_sell_pair
         df['year'] = pd.DatetimeIndex(df['DateSold']).year
         df['month'] = pd.DatetimeIndex(df['DateSold']).month
         df['return'] = df['SalesProceeds'] - df['Cost']
@@ -77,31 +80,15 @@ class Chart:
 
     def ROI_Compare(self, date_range='default', benchmark_name=['^DJI','^GSPC','^IXIC']):
         if date_range == 'default':
-            min_date = pd.to_datetime(min(self.profolio.history['TradeDate'])).replace(day=1)
-        
+            min_date = min(self.portfolio.account_value.index)
 
         benchmark = yf.download(benchmark_name)
         benchmark = pd.DataFrame(benchmark['Adj Close'])
         benchmark.index = pd.DatetimeIndex(benchmark.index)
 
-        pair = self.profolio.buy_sell_pair
-        pair['return'] = pair['SalesProceeds'] - pair['Cost']
-        Return = pd.DataFrame(pair.groupby('DateSold').sum(numeric_only=False)['return'])
-        Return.index=pd.DatetimeIndex(Return.index)
-        history = self.profolio.history
-        In = history[history['Action']=='Other']
-        In = In.groupby('TradeDate').sum(numeric_only=False)
-        In = In[In['Amount']>0] 
-        In.index = pd.DatetimeIndex(In.index)
-
-        benchmark['return'] = Return['return']
-        benchmark['In'] = In['Amount']
-        benchmark = benchmark.replace(np.nan, 0)
-        benchmark['return'] = benchmark['return'].cumsum()
-        benchmark['In'] = benchmark['In'].cumsum()
-
-        benchmark['total'] = benchmark['return'] + benchmark['In']
-        benchmark['ROI'] = benchmark['total'] / benchmark['In']
+        
+      
+        benchmark['ROI'] = self.portfolio.account_value/self.portfolio.principal_value
         benchmark = benchmark.replace(np.nan, 1)
 
         fig = make_subplots(
@@ -112,7 +99,7 @@ class Chart:
             shared_xaxes=True,vertical_spacing=0.05)
         fig.add_scatter(y= benchmark[benchmark.index>=min_date]['ROI'],
             x=benchmark[benchmark.index>=min_date].index, 
-            row=1, col=1, name='Profolio',
+            row=1, col=1, name='portfolio',
             line=dict(color=px.colors.qualitative.Plotly[1]))
        
         for i,col in enumerate(benchmark_name):
@@ -128,12 +115,12 @@ class Chart:
         fig.update_xaxes(title='x', visible=False, showticklabels=False, row=1, col=1)
         fig.update_layout(hovermode="x")
         fig.update_layout(legend_title_text='ROI')
-        fig.add_bar(y=Return[Return['return']>=0]['return'],x=Return[Return['return']>=0]['return'].index,marker={'color':'#EF553B'}, row=2, col=1,name='earn', showlegend=False)
-        fig.add_bar(y=Return[Return['return']<0]['return'],x=Return[Return['return']<0].index,marker={'color':'#00CC96'}, row=2, col=1,name='lost', showlegend=False)
+        #fig.add_bar(y=Return[Return['return']>=0]['return'],x=Return[Return['return']>=0]['return'].index,marker={'color':'#EF553B'}, row=2, col=1,name='earn', showlegend=False)
+        #fig.add_bar(y=Return[Return['return']<0]['return'],x=Return[Return['return']<0].index,marker={'color':'#00CC96'}, row=2, col=1,name='lost', showlegend=False)
         fig.show()
 
     def Storage_Share(self):
-        storage = self.profolio.storage
+        storage = self.portfolio.storage
         #print(storage['Quantity'])
         #print(storage['Remain_Quant'])
         #print(storage.groupby('Symbol').sum(numeric_only=False))
@@ -154,27 +141,18 @@ class Chart:
         fig.show()
 
     def Total_Value(self):
-        cash = pd.DataFrame(self.profolio.cash_balance)
-        stock = pd.DataFrame(self.profolio.stock_value)
-
-        min_date = pd.to_datetime(min(min(cash.index),min(stock.index)))
-        max_date = datetime.today()
-        idx = pd.date_range(min_date, max_date)
-        cash = cash.reindex(idx, method='ffill')
-        stock = stock.reindex(idx, method='ffill')
+        cash = pd.DataFrame(self.portfolio.cash_balance)
+        stock = pd.DataFrame(self.portfolio.position_value['total'])
+        margin = pd.DataFrame(-self.portfolio.margin_balance)
 
         cash['Balance'] = 'cash'
         cash.columns = ['Value', 'Balance']
-        cash = cash.fillna(0)
         stock['Balance'] = 'stock'
         stock.columns = ['Value', 'Balance']
-        stock = stock.fillna(0)
+        margin['Balance'] = 'margin'
+        margin.columns = ['Value', 'Balance']
 
-        df = pd.concat([cash,stock],axis=0)
-
-        df = pd.concat([cash,stock],axis=0)
-        #df = df.fillna(method='ffill')
-        #df = df.fillna(0)
+        df = pd.concat([margin,cash, stock],axis=0)
 
         df = df.reset_index()
         df.columns = ['Date', 'Value', 'Balance']
@@ -186,7 +164,6 @@ class Chart:
             'Date':False,
             'Value':':.1f'
         })
-        #self.__add_benchmark(fig, [min_date])
         fig.update_layout(legend_title_text='Balance')
         fig.update_layout(hovermode="x")
         fig.update_traces(connectgaps=True)
@@ -207,9 +184,10 @@ class Chart:
             )
     
 if __name__ == '__main__':
-    profolio = Profolio('Firstrade')
-    profolio.from_csv('data/FT_CSV_87701987.csv')
-    new_chart = Chart(profolio)
+    from portfolio import Portfolio
+    portfolio = Portfolio('Firstrade')
+    portfolio.from_csv('data/FT_CSV_87701987.csv')
+    new_chart = Chart(portfolio)
     #new_chart.ROE_DayHeld()
     #new_chart.WinRate_GainLose()
     #new_chart.Monthly_Return()
